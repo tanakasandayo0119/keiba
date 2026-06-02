@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
+<script>
+(function(){
+  const ok = sessionStorage.getItem('auth');
+  if(ok === '1') return;
+  const pw = prompt('パスワードを入力してください');
+  if(pw === 'keiba') {
+    sessionStorage.setItem('auth','1');
+  } else {
+    document.documentElement.innerHTML = '';
+    location.href = 'about:blank';
+  }
+})();
+</script>
 <title>競馬シミュレーション ダッシュボード v2</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
