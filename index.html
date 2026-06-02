@@ -269,6 +269,7 @@ const slots = [0,1,2,3].map(i => ({
   on: i < 2,
   name: SLOT_NAMES_DEF[i],
   kinds: 1,
+  dedup: [],
   bets: [0,1,2].map(() => ({
     baken: '三連複',
     kaikata: 'フォーメーション',
@@ -402,6 +403,28 @@ function buildSlotHTML(si) {
     const show = bi < sl.kinds;
     html += `<div id="bp-${si}-${bi}" style="display:${show?'block':'none'}">${buildBetPanel(si,bi)}</div>`;
   }
+
+  // 重複除外設定セクション
+  const otherActive = [0,1,2,3].filter(j=>j!==si && slots[j].on);
+  if(otherActive.length > 0) {
+    const dedupCount = (sl.dedup && sl.dedup.length) ? totalPoints(si) - effectiveSlotPoints(si) : 0;
+    html += `<div style="margin-top:10px;padding:8px 10px;background:#0d1117;border-radius:4px;border:1px solid #30363d">
+      <div style="font-size:11px;color:#8b949e;margin-bottom:6px;font-weight:600">🔀 重複除外設定</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">`;
+    for(const j of otherActive) {
+      const checked = sl.dedup && sl.dedup.includes(j);
+      html += `<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#c9d1d9;cursor:pointer;user-select:none">
+        <input type="checkbox" ${checked?'checked':''} onchange="toggleDedup(${si},${j},this.checked)" style="accent-color:#58a6ff">
+        <span style="color:${SLOT_COLORS[j]}">${escHtml(slots[j].name||'スロット '+(j+1))}</span>と重複を除外
+      </label>`;
+    }
+    html += `</div>`;
+    if(dedupCount > 0) {
+      html += `<div style="margin-top:6px;font-size:11px;color:#d29922">実効点数：${effectiveSlotPoints(si)}点 <span style="color:#555">（元${totalPoints(si)}点 → </span><span style="color:#f85149">−${dedupCount}点</span><span style="color:#555">削減）</span></div>`;
+    }
+    html += `</div>`;
+  }
+
   return html;
 }
 
@@ -483,6 +506,17 @@ function buildBetPanel(si, bi) {
   </div>`;
 
   return `<div class="bet-panel ${cls}"><div class="bet-panel-title">${label}</div>${inner}</div>`;
+}
+
+function toggleDedup(si, dsi, on) {
+  if(!slots[si].dedup) slots[si].dedup = [];
+  if(on) {
+    if(!slots[si].dedup.includes(dsi)) slots[si].dedup.push(dsi);
+  } else {
+    slots[si].dedup = slots[si].dedup.filter(x=>x!==dsi);
+  }
+  document.getElementById(`slot-card-${si}`).innerHTML = buildSlotHTML(si);
+  recalcAll();
 }
 
 function toggleSlot(si) {
@@ -600,6 +634,71 @@ function totalPoints(si) {
   return t;
 }
 
+// --- 組み合わせセット系ヘルパー ---
+function sortKey(arr) { return [...arr].sort((a,b)=>a-b).join(','); }
+
+function getBetCombSet(b) {
+  const result = new Set();
+  if(b.baken === '3連単') {
+    const p = [[b.t_a,b.t_b,b.t_c],[b.t_a,b.t_c,b.t_b],[b.t_b,b.t_a,b.t_c],[b.t_b,b.t_c,b.t_a],[b.t_c,b.t_a,b.t_b],[b.t_c,b.t_b,b.t_a]];
+    for(let i=0;i<6;i++) if(b.perms[i]) result.add(sortKey(p[i]));
+    return result;
+  }
+  const ex = parseExcl(b.excl);
+  if(b.kaikata === 'フォーメーション') {
+    const comp = companions(b.maxR, ex).filter(c=>c!==b.ax1&&c!==b.ax2);
+    for(const c of comp) result.add(sortKey([b.ax1,b.ax2,c]));
+    for(let i=0;i<comp.length;i++) for(let j=i+1;j<comp.length;j++) {
+      result.add(sortKey([b.ax1,comp[i],comp[j]]));
+      result.add(sortKey([b.ax2,comp[i],comp[j]]));
+    }
+    return result;
+  }
+  if(b.kaikata === '流し') {
+    const comp = companions(b.maxR, ex).filter(c=>c!==b.ax);
+    for(let i=0;i<comp.length;i++) for(let j=i+1;j<comp.length;j++)
+      result.add(sortKey([b.ax,comp[i],comp[j]]));
+    return result;
+  }
+  if(b.kaikata === 'ボックス') {
+    const horses = companions(b.maxR, ex);
+    for(let i=0;i<horses.length;i++) for(let j=i+1;j<horses.length;j++) for(let k=j+1;k<horses.length;k++)
+      result.add(sortKey([horses[i],horses[j],horses[k]]));
+    return result;
+  }
+  return result;
+}
+
+function getSlotCombSet(si) {
+  const sl = slots[si];
+  const result = new Set();
+  for(let bi=0;bi<sl.kinds;bi++) for(const c of getBetCombSet(sl.bets[bi])) result.add(c);
+  return result;
+}
+
+function getDedupCombSet(si) {
+  const sl = slots[si];
+  const result = new Set();
+  if(!sl.dedup || !sl.dedup.length) return result;
+  for(const dsi of sl.dedup) for(const c of getSlotCombSet(dsi)) result.add(c);
+  return result;
+}
+
+function getEffectiveSlotCombs(si) {
+  const myCombs = getSlotCombSet(si);
+  const dedupCombs = getDedupCombSet(si);
+  if(!dedupCombs.size) return myCombs;
+  const result = new Set();
+  for(const c of myCombs) if(!dedupCombs.has(c)) result.add(c);
+  return result;
+}
+
+function effectiveSlotPoints(si) {
+  const sl = slots[si];
+  if(!sl.dedup || !sl.dedup.length) return totalPoints(si);
+  return getEffectiveSlotCombs(si).size;
+}
+
 function evalBet(b, race) {
   const top3 = race.top3;
   if(!top3 || top3.length < 3) return {hit:false, pay:0, is3T:b.baken==='3連単'};
@@ -644,13 +743,39 @@ function evalBet(b, race) {
 function slotRaceResult(si, race) {
   const sl = slots[si];
   let invest = 0, retPay = 0, anyHit = false, has3T = false;
+  const hasDedupSettings = sl.dedup && sl.dedup.length > 0;
+  const dedupSet = hasDedupSettings ? getDedupCombSet(si) : null;
+
   for(let bi=0;bi<sl.kinds;bi++){
     const b = sl.bets[bi];
-    const res = evalBet(b, race);
-    invest += b.budget;
-    if(res.hit){ retPay += res.pay; anyHit = true; }
-    // has3T: flag only when 3連単 slot exists AND this race lacks tansho_pay data
-    if(res.is3T && race.tansho_pay == null) has3T = true;
+
+    if(hasDedupSettings && b.baken !== '3連単') {
+      // デデュプ対応パス
+      const fullCombs = getBetCombSet(b);
+      const effectiveCombs = dedupSet.size
+        ? new Set([...fullCombs].filter(c=>!dedupSet.has(c)))
+        : fullCombs;
+      const totalCnt = fullCombs.size || 1;
+      const effectiveCnt = effectiveCombs.size;
+      const effectiveBudget = Math.round(b.budget * effectiveCnt / totalCnt);
+      invest += effectiveBudget;
+
+      if(effectiveCnt > 0 && race.top3 && race.top3.length >= 3) {
+        const top3Key = sortKey(race.top3);
+        if(effectiveCombs.has(top3Key)) {
+          // 払戻：コンボ単価（元の予算/元の総点数）× payout/100
+          const perComboCost = b.budget / totalCnt;
+          retPay += perComboCost / 100 * (race.payout || 0);
+          anyHit = true;
+        }
+      }
+    } else {
+      // 通常パス（3連単 or デデュプなし）
+      const res = evalBet(b, race);
+      invest += b.budget;
+      if(res.hit){ retPay += res.pay; anyHit = true; }
+      if(res.is3T && race.tansho_pay == null) has3T = true;
+    }
   }
   return {hit: anyHit, invest, pay: retPay, profit: retPay - invest, has3T};
 }
@@ -658,7 +783,15 @@ function slotRaceResult(si, race) {
 function recalcAll() {
   slots.forEach((sl,si)=>{
     const badge = document.getElementById(`pts-badge-${si}`);
-    if(badge) badge.textContent = totalPoints(si) + '点';
+    if(badge) {
+      const total = totalPoints(si);
+      const eff = effectiveSlotPoints(si);
+      if(sl.dedup && sl.dedup.length && eff < total) {
+        badge.textContent = `${eff}点（−${total-eff}重複除外）`;
+      } else {
+        badge.textContent = total + '点';
+      }
+    }
   });
   renderCmpTable();
   renderRaceTable();
@@ -686,7 +819,7 @@ function renderCmpTable() {
       hitRate: n ? hits/n*100 : 0,
       roi: invest ? pay/invest*100 : 0,
       profit: pay - invest,
-      pts: totalPoints(si),
+      pts: effectiveSlotPoints(si),
     };
   });
 
