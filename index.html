@@ -85,8 +85,9 @@ h1{color:#58a6ff;padding:16px 24px 10px;font-size:20px;border-bottom:1px solid #
 .bp-num:focus{outline:none;border-color:#58a6ff}
 .bp-text{background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:3px 6px;font-size:11px;width:90px}
 .bp-text:focus{outline:none;border-color:#58a6ff}
-.bp-budget{background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:3px 6px;font-size:11px;width:70px;text-align:right}
+.bp-budget{background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:3px 6px;font-size:11px;width:70px;text-align:right;-moz-appearance:textfield}
 .bp-budget:focus{outline:none;border-color:#58a6ff}
+.bp-budget::-webkit-inner-spin-button,.bp-budget::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 
 /* 3連単 permutations */
 .perm-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin:4px 0}
@@ -195,13 +196,11 @@ table.race-table tr:hover td{background:#1c2128}
     </div>
     <div class="fg">
       <div class="fl">年</div>
-      <select class="filter-sel" id="f_year" onchange="applyFilters()"><option value="">すべて</option></select>
+      <div class="dist-wrap" id="year-filters"></div>
     </div>
     <div class="fg">
       <div class="fl">月</div>
-      <select class="filter-sel" id="f_month" onchange="applyFilters()">
-        <option value="">すべて</option>
-      </select>
+      <div class="dist-wrap" id="month-filters"></div>
     </div>
     <div class="fg">
       <div class="fl">開催日</div>
@@ -232,6 +231,10 @@ table.race-table tr:hover td{background:#1c2128}
     <div class="fg">
       <div class="fl">距離</div>
       <div class="dist-wrap" id="dist-filters"></div>
+    </div>
+    <div class="fg">
+      <div class="fl">馬名・騎手・調教師</div>
+      <input type="text" id="f_name" class="filter-sel" placeholder="例：コントレイル" style="min-width:140px" oninput="applyFilters()">
     </div>
     <button class="btn-reset" onclick="resetFilters()">リセット</button>
     <div class="race-count-chip" id="race-count-chip">0 レース</div>
@@ -279,10 +282,70 @@ const slots = [0,1,2,3].map(i => ({
     t_a: 1, t_b: 2, t_c: 3,
     perms: [true, false, false, false, false, false],
     budget: 5000,
+    slope: null,
   })),
 }));
 
 let activeRaces = [...RACES];
+
+// --- 傾斜計算用：人気コンボ別・最大人気別 配当統計を事前集計 ---
+const _comboStats = {};   // "1,2,3" → {n, sum}
+const _maxPopStats = {};  // 5 → {n, sum}
+RACES.forEach(r => {
+  if(!r.top3 || r.top3.length < 3 || !r.payout) return;
+  const key = [...r.top3].sort((a,b)=>a-b).join(',');
+  if(!_comboStats[key]) _comboStats[key] = {n:0, sum:0};
+  _comboStats[key].n++; _comboStats[key].sum += r.payout;
+  const mx = Math.max(...r.top3);
+  if(!_maxPopStats[mx]) _maxPopStats[mx] = {n:0, sum:0};
+  _maxPopStats[mx].n++; _maxPopStats[mx].sum += r.payout;
+});
+const _overallAvg = (() => {
+  const all = Object.values(_comboStats).reduce((a,v)=>({n:a.n+v.n,sum:a.sum+v.sum}),{n:0,sum:0});
+  return all.n ? all.sum/all.n : 1500;
+})();
+const SLOPE_MIN_SAMPLES = 5;
+
+function estimatePayout(key) {
+  // ③ 過去データ（サンプル数十分な場合）
+  const s = _comboStats[key];
+  if(s && s.n >= SLOPE_MIN_SAMPLES) return s.sum / s.n;
+  // ② 最大人気ティア別平均（近いティアで補完）
+  const mx = Math.max(...key.split(',').map(Number));
+  for(let d=0; d<=10; d++) {
+    for(const t of (d===0 ? [mx] : [mx+d, mx-d])) {
+      if(t < 1) continue;
+      const ts = _maxPopStats[t];
+      if(ts && ts.n >= 3) return ts.sum / ts.n;
+    }
+  }
+  return _overallAvg;
+}
+
+function computeSlopeWeights(combs, budget) {
+  // 各組み合わせの推定配当の逆数比例で配分
+  const ests = combs.map(k => ({k, est: estimatePayout(k)}));
+  const invSum = ests.reduce((s,e) => s + 1/e.est, 0);
+  let weights = {};
+  ests.forEach(({k, est}) => { weights[k] = (1/est) / invSum; });
+  // 最低¥100/組み合わせ を保証（比率を再調整）
+  const minFrac = 100 / budget;
+  let changed = true;
+  while(changed) {
+    changed = false;
+    const fixed = new Set(), free = [];
+    let fixedSum = 0, freeSum = 0;
+    for(const k of combs) {
+      if(weights[k] <= minFrac + 1e-9) { fixed.add(k); fixedSum += minFrac; changed = true; }
+      else { free.push(k); freeSum += weights[k]; }
+    }
+    if(!changed) break;
+    if(free.length === 0) { combs.forEach(k => weights[k] = 1/combs.length); break; }
+    const scale = Math.max(0, 1 - fixedSum) / freeSum;
+    combs.forEach(k => { weights[k] = fixed.has(k) ? minFrac : weights[k] * scale; });
+  }
+  return weights;
+}
 let raceFilter = 'all';
 let colWidth = 90;
 
@@ -290,10 +353,15 @@ const allDists = [...new Set(RACES.map(r => r.distance))].sort((a,b)=>parseInt(a
 const allYears = [...new Set(RACES.map(r => r.date.slice(0,4)))].sort();
 
 function initFilters() {
-  const ysel = document.getElementById('f_year');
-  allYears.forEach(y => ysel.insertAdjacentHTML('beforeend', `<option value="${y}">${y}年</option>`));
-  const msel = document.getElementById('f_month');
-  for(let m=1;m<=12;m++) msel.insertAdjacentHTML('beforeend',`<option value="${m}">${m}月</option>`);
+  const yw = document.getElementById('year-filters');
+  yw.innerHTML = allYears.map(y =>
+    `<label class="dcb"><input type="checkbox" class="year-cb" value="${y}" checked onchange="applyFilters()"> ${y}年</label>`
+  ).join('');
+  const allMonths = [...new Set(RACES.map(r => parseInt(r.date.replace(/^\d{4}年(\d+)月.*$/,'$1'))))].sort((a,b)=>a-b);
+  const mw = document.getElementById('month-filters');
+  mw.innerHTML = allMonths.map(m =>
+    `<label class="dcb"><input type="checkbox" class="month-cb" value="${m}" checked onchange="applyFilters()"> ${m}月</label>`
+  ).join('');
   const dw = document.getElementById('dist-filters');
   dw.innerHTML = allDists.map(d =>
     `<label class="dcb"><input type="checkbox" class="dist-cb" value="${d}" checked onchange="applyFilters()"> ${d}</label>`
@@ -302,20 +370,19 @@ function initFilters() {
 
 function applyFilters() {
   const track = document.getElementById('f_track').value;
-  const year  = document.getElementById('f_year').value;
-  const month = document.getElementById('f_month').value;
   const date  = document.getElementById('f_date').value;
   const temp  = document.getElementById('f_temp').value;
   const upset = document.getElementById('f_upset').value;
-  const checkedDists = new Set([...document.querySelectorAll('.dist-cb:checked')].map(e=>e.value));
-  updateDateOptions(year, month);
+  const nameQ = document.getElementById('f_name').value.trim();
+  const checkedYears  = new Set([...document.querySelectorAll('.year-cb:checked')].map(e=>e.value));
+  const checkedMonths = new Set([...document.querySelectorAll('.month-cb:checked')].map(e=>+e.value));
+  const checkedDists  = new Set([...document.querySelectorAll('.dist-cb:checked')].map(e=>e.value));
+  updateDateOptions(checkedYears, checkedMonths);
   activeRaces = RACES.filter(r => {
     if(track && r.track !== track) return false;
-    if(year  && !r.date.startsWith(year)) return false;
-    if(month) {
-      const mo = parseInt(r.date.replace(/^\d{4}年(\d+)月.*$/,'$1'));
-      if(mo !== parseInt(month)) return false;
-    }
+    if(!checkedYears.has(r.date.slice(0,4))) return false;
+    const mo = parseInt(r.date.replace(/^\d{4}年(\d+)月.*$/,'$1'));
+    if(!checkedMonths.has(mo)) return false;
     if(date && r.date !== date) return false;
     if(temp !== '') {
       const t = r.temp;
@@ -328,35 +395,52 @@ function applyFilters() {
       if(u !== parseInt(upset)) return false;
     }
     if(!checkedDists.has(r.distance)) return false;
+    if(nameQ) {
+      const q = nameQ.toLowerCase();
+      const info = r.top3_info || [];
+      const hit = info.some(h =>
+        (h.horse||'').toLowerCase().includes(q) ||
+        (h.jockey||'').toLowerCase().includes(q) ||
+        (h.trainer||'').toLowerCase().includes(q)
+      );
+      if(!hit) return false;
+    }
     return true;
   });
+  // 日付・レース番号を数値で正しくソート
+  function dateKey(r) {
+    const m = r.date.match(/(\d{4})年(\d+)月(\d+)日/);
+    return m ? parseInt(m[1])*10000 + parseInt(m[2])*100 + parseInt(m[3]) : 0;
+  }
+  function raceNumKey(r) { return parseInt(r.race_num); }
+  activeRaces.sort((a,b) => dateKey(a) - dateKey(b) || raceNumKey(a) - raceNumKey(b));
   document.getElementById('race-count-chip').textContent = activeRaces.length + ' レース';
   recalcAll();
 }
 
-function updateDateOptions(year, month) {
+function updateDateOptions(checkedYears, checkedMonths) {
   const dsel = document.getElementById('f_date');
   const cur = dsel.value;
   const dates = [...new Set(RACES.filter(r => {
-    if(year && !r.date.startsWith(year)) return false;
-    if(month) {
-      const mo = parseInt(r.date.replace(/^\d{4}年(\d+)月.*$/,'$1'));
-      if(mo !== parseInt(month)) return false;
-    }
+    if(!checkedYears.has(r.date.slice(0,4))) return false;
+    const mo = parseInt(r.date.replace(/^\d{4}年(\d+)月.*$/,'$1'));
+    if(!checkedMonths.has(mo)) return false;
     return true;
-  }).map(r=>r.date))].sort();
+  }).map(r=>r.date))].sort((a,b)=>{
+    const km = d => { const x=d.match(/(\d{4})年(\d+)月(\d+)日/); return x?+x[1]*10000+ +x[2]*100+ +x[3]:0; };
+    return km(a)-km(b);
+  });
   dsel.innerHTML = '<option value="">すべて</option>' +
     dates.map(d=>`<option value="${d}"${d===cur?' selected':''}>${d}</option>`).join('');
 }
 
 function resetFilters() {
   document.getElementById('f_track').value='';
-  document.getElementById('f_year').value='';
-  document.getElementById('f_month').value='';
   document.getElementById('f_date').value='';
   document.getElementById('f_temp').value='';
   document.getElementById('f_upset').value='';
-  document.querySelectorAll('.dist-cb').forEach(c=>c.checked=true);
+  document.getElementById('f_name').value='';
+  document.querySelectorAll('.year-cb,.month-cb,.dist-cb').forEach(c=>c.checked=true);
   applyFilters();
 }
 
@@ -504,11 +588,37 @@ function buildBetPanel(si, bi) {
     </div>`;
   }
 
+  const minBudget = getCount(b) * 100;
+  const budgetWarn = b.budget < minBudget;
   inner += `<div class="bp-row" style="margin-top:4px">
     <span class="bp-label">予算</span>
-    <input class="bp-budget" type="number" min="100" step="100" value="${b.budget}" oninput="slots[${si}].bets[${bi}].budget=+this.value;recalcAll()">
-    <span style="font-size:11px;color:#8b949e">円/レース</span>
+    <input class="bp-budget" type="number" min="${minBudget}" step="100" value="${b.budget}"
+      style="${budgetWarn?'border-color:#f85149;':''}color:${budgetWarn?'#f85149':'#c9d1d9'}"
+      oninput="setBudget(${si},${bi},+this.value)">
+    <span style="font-size:11px;color:${budgetWarn?'#f85149':'#8b949e'}">円/レース${budgetWarn?` (最低¥${minBudget.toLocaleString()})`:''}</span>
   </div>`;
+
+  // 傾斜UI（三連複のみ）
+  if(b.baken === '三連複') {
+    const cnt = getCount(b);
+    if(b.slope) {
+      const vals = Object.values(b.slope);
+      const minPct = (Math.min(...vals)*100).toFixed(1);
+      const maxPct = (Math.max(...vals)*100).toFixed(1);
+      const minAmt = Math.round(Math.min(...vals)*b.budget);
+      const maxAmt = Math.round(Math.max(...vals)*b.budget);
+      inner += `<div class="bp-row" style="margin-top:2px;align-items:center;gap:6px">
+        <span style="font-size:10px;background:#1a3a1f;border:1px solid #2ea043;color:#3fb950;border-radius:4px;padding:2px 7px">傾斜ON</span>
+        <span style="font-size:10px;color:#8b949e">最小¥${minAmt.toLocaleString()}(${minPct}%) 〜 最大¥${maxAmt.toLocaleString()}(${maxPct}%)</span>
+        <button onclick="clearSlope(${si},${bi})" style="margin-left:auto;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#8b949e;padding:2px 8px;cursor:pointer;font-size:10px">解除</button>
+      </div>`;
+    } else {
+      inner += `<div class="bp-row" style="margin-top:2px">
+        <button onclick="applySlope(${si},${bi})" style="background:#21262d;border:1px solid #30363d;border-radius:4px;color:#8b949e;padding:3px 10px;cursor:pointer;font-size:11px" title="トリガミ防止のため、推定配当の逆数比例で各組み合わせへの賭け金を自動調整します">傾斜自動計算</button>
+        <span style="font-size:10px;color:#484f58;margin-left:4px">${cnt}点均等</span>
+      </div>`;
+    }
+  }
 
   return `<div class="bet-panel ${cls}"><div class="bet-panel-title">${label}</div>${inner}</div>`;
 }
@@ -546,6 +656,29 @@ function setBaken(si, bi, val) {
   slots[si].bets[bi].kaikata = val === '三連複' ? 'フォーメーション' : '';
   rebuildSlot(si);
   recalcAll();
+}
+
+function setBudget(si, bi, val) {
+  // 予算変更で傾斜をクリア（比率が変わるため再計算が必要）
+  if(slots[si].bets[bi].slope) {
+    slots[si].bets[bi].slope = null;
+    rebuildSlot(si);
+  }
+  slots[si].bets[bi].budget = val;
+  recalcAll();
+  // 警告表示の更新（入力中はリビルドせず色だけ変える）
+  const minB = getCount(slots[si].bets[bi]) * 100;
+  const inp = document.querySelector(`#slot-card-${si} #bp-${si}-${bi} .bp-budget`);
+  if(inp) {
+    const warn = val < minB;
+    inp.style.borderColor = warn ? '#f85149' : '';
+    inp.style.color = warn ? '#f85149' : '#c9d1d9';
+    const hint = inp.nextElementSibling;
+    if(hint) {
+      hint.style.color = warn ? '#f85149' : '#8b949e';
+      hint.textContent = `円/レース${warn ? ` (最低¥${minB.toLocaleString()})` : ''}`;
+    }
+  }
 }
 
 function setKaikata(si, bi, val) {
@@ -744,25 +877,32 @@ function evalBet(b, race) {
     return {hit, pay:pay3T, is3T:true, cnt};
   }
 
+  // 傾斜がある場合の払戻計算ヘルパー
+  const slopePay = (winKey, payout) => {
+    if(b.slope && b.slope[winKey] !== undefined)
+      return b.budget * b.slope[winKey] / 100 * payout;
+    return (b.budget / Math.max(cnt,1)) / 100 * payout;
+  };
+
   if(b.kaikata==='フォーメーション') {
     const axes = new Set([b.ax1,b.ax2]);
     const comp = new Set(companions(b.maxR, ex).filter(c=>c!==b.ax1&&c!==b.ax2));
     const axInTop3 = top3.some(p=>axes.has(p));
     const allCovered = top3.every(p=>axes.has(p)||comp.has(p));
     const hit = axInTop3 && allCovered;
-    const pay = hit ? (b.budget / Math.max(cnt,1)) / 100 * race.payout : 0;
+    const pay = hit ? slopePay(sortKey(top3), race.payout) : 0;
     return {hit, pay, is3T:false, cnt};
   }
   if(b.kaikata==='流し') {
     const comp = new Set(companions(b.maxR, ex).filter(c=>c!==b.ax));
     const hit = top3.includes(b.ax) && top3.every(p=>p===b.ax||comp.has(p));
-    const pay = hit ? (b.budget / Math.max(cnt,1)) / 100 * race.payout : 0;
+    const pay = hit ? slopePay(sortKey(top3), race.payout) : 0;
     return {hit, pay, is3T:false, cnt};
   }
   if(b.kaikata==='ボックス') {
     const horses = new Set(companions(b.maxR, ex));
     const hit = top3.every(p=>horses.has(p));
-    const pay = hit ? (b.budget / Math.max(cnt,1)) / 100 * race.payout : 0;
+    const pay = hit ? slopePay(sortKey(top3), race.payout) : 0;
     return {hit, pay, is3T:false, cnt};
   }
   return {hit:false, pay:0, is3T:false, cnt};
@@ -783,15 +923,25 @@ function slotRaceResult(si, race) {
       const effectiveCombs = (hasDedupSettings && dedupSet.size)
         ? new Set([...intraCombs].filter(c=>!dedupSet.has(c)))
         : intraCombs;
-      const fullCnt = getBetCombSet(b).size || 1;
-      const effectiveCnt = effectiveCombs.size;
-      const effectiveBudget = Math.round(b.budget * effectiveCnt / fullCnt);
-      invest += effectiveBudget;
+      const fullCombs = getBetCombSet(b);
+      const fullCnt = fullCombs.size || 1;
+      // 投資額：傾斜あり→有効コンボの配分合計、なし→比例
+      let effectiveInvest;
+      if(b.slope) {
+        effectiveInvest = 0;
+        for(const c of effectiveCombs) effectiveInvest += b.budget * (b.slope[c] || 1/fullCnt);
+        effectiveInvest = Math.round(effectiveInvest);
+      } else {
+        effectiveInvest = Math.round(b.budget * effectiveCombs.size / fullCnt);
+      }
+      invest += effectiveInvest;
 
-      if(effectiveCnt > 0 && race.top3 && race.top3.length >= 3) {
+      if(effectiveCombs.size > 0 && race.top3 && race.top3.length >= 3) {
         const top3Key = sortKey(race.top3);
         if(effectiveCombs.has(top3Key)) {
-          const perComboCost = b.budget / fullCnt;
+          const perComboCost = b.slope
+            ? b.budget * (b.slope[top3Key] || 1/fullCnt)
+            : b.budget / fullCnt;
           retPay += perComboCost / 100 * (race.payout || 0);
           anyHit = true;
         }
@@ -807,7 +957,41 @@ function slotRaceResult(si, race) {
   return {hit: anyHit, invest, pay: retPay, profit: retPay - invest, has3T};
 }
 
+function applySlope(si, bi) {
+  const b = slots[si].bets[bi];
+  const combs = [...getBetCombSet(b)];
+  if(combs.length === 0) return;
+  b.slope = computeSlopeWeights(combs, b.budget);
+  rebuildSlot(si);
+  recalcAll();
+}
+
+function clearSlope(si, bi) {
+  slots[si].bets[bi].slope = null;
+  rebuildSlot(si);
+  recalcAll();
+}
+
 function recalcAll() {
+  // 予算が最低額を下回っていたら補正
+  slots.forEach(sl => {
+    for(let bi=0;bi<sl.kinds;bi++) {
+      const minB = getCount(sl.bets[bi]) * 100;
+      if(sl.bets[bi].budget < minB) sl.bets[bi].budget = minB;
+    }
+  });
+  // 傾斜の組み合わせが現在の設定と合わなくなったらクリア
+  slots.forEach(sl => {
+    for(let bi=0;bi<sl.kinds;bi++) {
+      const b = sl.bets[bi];
+      if(b.slope) {
+        const currentCombs = getBetCombSet(b);
+        const slopeKeys = new Set(Object.keys(b.slope));
+        if(currentCombs.size !== slopeKeys.size || ![...currentCombs].every(c=>slopeKeys.has(c)))
+          b.slope = null;
+      }
+    }
+  });
   slots.forEach((sl,si)=>{
     const badge = document.getElementById(`pts-badge-${si}`);
     if(badge) {
@@ -888,7 +1072,12 @@ function renderRaceTable() {
   const activeSI = slots.map((sl,i)=>sl.on?i:-1).filter(i=>i>=0);
   const tbl = document.getElementById('race-table');
 
-  const baseH = `<th class="lh" style="min-width:${colWidth}px">日付</th><th class="lh">レース</th><th class="lh">コース</th><th>配当</th><th>距離</th><th style="min-width:180px">結果</th>`;
+  // アクティブスロットの馬券種を集計
+  const show3F = activeSI.some(si => slots[si].bets.slice(0, slots[si].kinds).some(b => b.baken === '三連複'));
+  const show3T = activeSI.some(si => slots[si].bets.slice(0, slots[si].kinds).some(b => b.baken === '3連単'));
+  const payColLabel = (show3F && show3T) ? '3連複 / 3連単' : show3T ? '3連単配当' : '3連複配当';
+
+  const baseH = `<th class="lh" style="min-width:${colWidth}px">日付</th><th class="lh">レース</th><th class="lh">コース</th><th>${payColLabel}</th><th>距離</th><th style="min-width:180px">結果</th>`;
   const slotH = activeSI.map(si=>`<th style="color:${SLOT_COLORS[si]}" colspan="4">${escHtml(slots[si].name)}</th>`).join('');
   const subH  = activeSI.map(si=>
     `<th style="font-size:10px;color:${SLOT_COLORS[si]}88">的中</th><th style="font-size:10px;color:${SLOT_COLORS[si]}88">払戻推定</th><th style="font-size:10px;color:${SLOT_COLORS[si]}88">損益推定</th><th style="font-size:10px;color:${SLOT_COLORS[si]}88">回収率</th>`
@@ -911,28 +1100,24 @@ function renderRaceTable() {
     const mx = Math.max(...race.top3);
     const uLabel = mx<=3?'堅':mx<=5?'やや堅':mx<=8?'中波乱':mx<=11?'大波乱':'超波乱';
 
-    // 結果セル: 人気順（着順）馬名
+    // 結果セル: 着順順で 人気(着順)馬名 を表示
     const info = race.top3_info || [];
-    // top3_info は着順順なので人気順にソート
-    const infoByPop = [...info].sort((a,b)=>a.pop-b.pop);
-    const chakuMap = {0:'1着',1:'2着',2:'3着'}; // info配列インデックス→着順ラベル
-    const popColors = ['#f5a623','#9b59b6','#2980b9']; // 1人気,2人気,3人気の色
-    const pop3 = infoByPop.length > 0
-      ? infoByPop.map((h,i)=>{
-          const color = popColors[i] || '#8b949e';
-          // 元のinfoでの位置（着順）を求める
-          const chakuIdx = info.findIndex(x=>x.pop===h.pop);
-          const chakuLabel = chakuMap[chakuIdx] || '—';
+    const chakuMap = ['1着','2着','3着'];
+    const popColors = ['#f5a623','#9b59b6','#2980b9'];
+    const pop3 = info.length > 0
+      ? info.map((h,i)=>{
+          const color = h.pop<=3 ? popColors[h.pop-1] : '#8b949e';
           return `<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px;white-space:nowrap">
             <span style="font-size:10px;color:${color};font-weight:700;min-width:28px">${h.pop}人気</span>
-            <span style="font-size:10px;color:#8b949e;min-width:24px">(${chakuLabel})</span>
+            <span style="font-size:10px;color:#8b949e;min-width:24px">(${chakuMap[i]||'—'})</span>
             <span style="font-size:12px;font-weight:600;color:#e6edf3">${h.horse||'—'}</span>
           </div>`;
         }).join('')
-      : [...race.top3].sort((a,b)=>a-b).map((p,i)=>{
-          const color = popColors[i] || '#8b949e';
+      : (race.top3||[]).map((p,i)=>{
+          const color = p<=3 ? popColors[p-1] : '#8b949e';
           return `<div style="display:flex;align-items:center;gap:5px;margin-bottom:3px">
             <span style="font-size:10px;color:${color};font-weight:700;min-width:28px">${p}人気</span>
+            <span style="font-size:10px;color:#8b949e;min-width:24px">(${chakuMap[i]||'—'})</span>
           </div>`;
         }).join('');
 
@@ -951,7 +1136,18 @@ function renderRaceTable() {
     }).join('');
 
     const raceIdx = activeRaces.indexOf(race);
-    rows.push(`<tr class="${rowCls} race-row" onclick="openRaceModal(activeRaces[${raceIdx}])"><td class="lh" style="min-width:${colWidth}px">${race.date}</td><td class="lh">${race.race_num} ${escHtml(race.race_name)}</td><td class="lh">${race.track}</td><td>¥${race.payout.toLocaleString()}</td><td>${race.distance}<br><span style="font-size:10px;color:#8b949e">${uLabel}</span></td><td style="min-width:180px">${pop3}</td>${slotCells}</tr>`);
+    // 配当セル：アクティブスロットの馬券種に応じて表示
+    let payCell = '';
+    if(show3F && show3T) {
+      const f = race.payout ? `¥${Math.round(race.payout).toLocaleString()}` : '—';
+      const t = race.tansho_pay ? `¥${Math.round(race.tansho_pay).toLocaleString()}` : '—';
+      payCell = `<td style="font-size:12px"><span style="color:#8b949e;font-size:10px">複</span>${f}<br><span style="color:#8b949e;font-size:10px">単</span>${t}</td>`;
+    } else if(show3T) {
+      payCell = `<td>${race.tansho_pay ? '¥'+Math.round(race.tansho_pay).toLocaleString() : '—'}</td>`;
+    } else {
+      payCell = `<td>${race.payout ? '¥'+Math.round(race.payout).toLocaleString() : '—'}</td>`;
+    }
+    rows.push(`<tr class="${rowCls} race-row" onclick="openRaceModal(activeRaces[${raceIdx}])"><td class="lh" style="min-width:${colWidth}px">${race.date}</td><td class="lh">${race.race_num} ${escHtml(race.race_name)}</td><td class="lh">${race.track}</td>${payCell}<td>${race.distance}<br><span style="font-size:10px;color:#8b949e">${uLabel}</span></td><td style="min-width:180px">${pop3}</td>${slotCells}</tr>`);
   });
 
   tbl.querySelector('tbody').innerHTML = rows.join('') || '<tr><td colspan="30" style="text-align:center;color:#8b949e;padding:20px">表示するレースがありません</td></tr>';
