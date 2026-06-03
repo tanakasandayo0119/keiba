@@ -1037,20 +1037,52 @@ function buildBetPanel(si, bi) {
       </div>`;
     }
   } else {
-    inner += `<div class="bp-row" style="align-items:center">
-      <span style="font-size:10px;color:#8b949e;min-width:60px">人気で指定</span>
-      <span class="bp-label">①</span>
-      <input class="bp-num" type="number" min="1" max="18" value="${b.t_a}" oninput="slots[${si}].bets[${bi}].t_a=+this.value;scheduleRecalc()" title="1着予想の人気順位">
-      <span class="bp-label" style="margin-left:4px">②</span>
-      <input class="bp-num" type="number" min="1" max="18" value="${b.t_b}" oninput="slots[${si}].bets[${bi}].t_b=+this.value;scheduleRecalc()" title="2着予想の人気順位">
-      <span class="bp-label" style="margin-left:4px">③</span>
-      <input class="bp-num" type="number" min="1" max="18" value="${b.t_c}" oninput="slots[${si}].bets[${bi}].t_c=+this.value;scheduleRecalc()" title="3着予想の人気順位">
-    </div>
-    <div class="perm-grid">
-      ${[['①→②→③',0],['①→③→②',1],['②→①→③',2],['②→③→①',3],['③→①→②',4],['③→②→①',5]].map(([lbl,pi])=>
-        `<label class="perm-cb"><input type="checkbox" ${b.perms[pi]?'checked':''} oninput="slots[${si}].bets[${bi}].perms[${pi}]=this.checked;recalcAll()"> ${lbl}</label>`
-      ).join('')}
+    // 3連単：買い方セレクター
+    const ka3tOpts = ['流し(1着)','流し(2着)','ボックス','指定'];
+    const cur3t = b.kaikata || '指定';
+    inner += `<div class="bp-row">
+      <span class="bp-label">買い方</span>
+      <select class="bp-sel" oninput="setKaikata(${si},${bi},this.value)">
+        ${ka3tOpts.map(k=>`<option${cur3t===k?' selected':''}>${k}</option>`).join('')}
+      </select>
     </div>`;
+
+    if(cur3t==='流し(1着)'||cur3t==='流し(2着)') {
+      const axLabel = cur3t==='流し(1着)' ? '1着軸' : '2着軸';
+      inner += `<div class="bp-row">
+        <span class="bp-label">${axLabel}<small style="color:#555;font-size:9px">人気</small></span>
+        <input class="bp-num" type="number" min="1" max="18" value="${b.ax}" oninput="slots[${si}].bets[${bi}].ax=+this.value;recalcAll()" title="軸の人気順位（例：2番人気なら2）">
+        <span class="bp-label" style="margin-left:4px">相手〜<small style="color:#555;font-size:9px">人気</small></span>
+        <input class="bp-num" type="number" min="1" max="18" value="${b.maxR}" oninput="slots[${si}].bets[${bi}].maxR=+this.value;scheduleRecalc()" title="相手の最大人気順位">
+      </div>
+      <div class="bp-row">
+        <span class="bp-label">除外<small style="color:#555;font-size:9px">人気</small></span>
+        <input class="bp-text" type="text" value="${b.excl}" placeholder="例:4,5" oninput="slots[${si}].bets[${bi}].excl=this.value;scheduleRecalc()">
+      </div>`;
+    } else if(cur3t==='ボックス') {
+      inner += `<div class="bp-row">
+        <span class="bp-label">〜<small style="color:#555;font-size:9px">人気</small></span>
+        <input class="bp-num" type="number" min="1" max="18" value="${b.maxR}" oninput="slots[${si}].bets[${bi}].maxR=+this.value;scheduleRecalc()" title="ボックスの最大人気順位">
+        <span class="bp-label" style="margin-left:4px">除外<small style="color:#555;font-size:9px">人気</small></span>
+        <input class="bp-text" type="text" value="${b.excl}" placeholder="例:4,5" oninput="slots[${si}].bets[${bi}].excl=this.value;scheduleRecalc()">
+      </div>`;
+    } else {
+      // 指定（既存UI）
+      inner += `<div class="bp-row" style="align-items:center">
+        <span style="font-size:10px;color:#8b949e;min-width:60px">人気で指定</span>
+        <span class="bp-label">①</span>
+        <input class="bp-num" type="number" min="1" max="18" value="${b.t_a}" oninput="slots[${si}].bets[${bi}].t_a=+this.value;scheduleRecalc()" title="1着予想の人気順位">
+        <span class="bp-label" style="margin-left:4px">②</span>
+        <input class="bp-num" type="number" min="1" max="18" value="${b.t_b}" oninput="slots[${si}].bets[${bi}].t_b=+this.value;scheduleRecalc()" title="2着予想の人気順位">
+        <span class="bp-label" style="margin-left:4px">③</span>
+        <input class="bp-num" type="number" min="1" max="18" value="${b.t_c}" oninput="slots[${si}].bets[${bi}].t_c=+this.value;scheduleRecalc()" title="3着予想の人気順位">
+      </div>
+      <div class="perm-grid">
+        ${[['①→②→③',0],['①→③→②',1],['②→①→③',2],['②→③→①',3],['③→①→②',4],['③→②→①',5]].map(([lbl,pi])=>
+          `<label class="perm-cb"><input type="checkbox" ${b.perms[pi]?'checked':''} oninput="slots[${si}].bets[${bi}].perms[${pi}]=this.checked;recalcAll()"> ${lbl}</label>`
+        ).join('')}
+      </div>`;
+    }
   }
 
   const minBudget = getCount(b) * 100;
@@ -1118,7 +1150,7 @@ function setKinds(si, k) {
 
 function setBaken(si, bi, val) {
   slots[si].bets[bi].baken = val;
-  slots[si].bets[bi].kaikata = val === '三連複' ? 'フォーメーション' : '';
+  slots[si].bets[bi].kaikata = val === '三連複' ? 'フォーメーション' : (val === '3連単' ? '流し(1着)' : '');
   rebuildSlot(si);
   recalcAll();
 }
@@ -1211,7 +1243,18 @@ function companions(maxR, exclSet) {
 }
 
 function getCount(b) {
-  if(b.baken==='3連単') return b.perms.filter(Boolean).length;
+  if(b.baken==='3連単') {
+    const ex = parseExcl(b.excl);
+    if(b.kaikata==='流し(1着)'||b.kaikata==='流し(2着)') {
+      const n = companions(b.maxR, ex).filter(c=>c!==b.ax).length;
+      return n*(n-1);
+    }
+    if(b.kaikata==='ボックス') {
+      const n = companions(b.maxR, ex).length;
+      return n*(n-1)*(n-2);
+    }
+    return b.perms.filter(Boolean).length; // 指定（kaikata=''含む）
+  }
   const ex = parseExcl(b.excl);
   if(b.kaikata==='フォーメーション') {
     const comp = companions(b.maxR, ex).filter(c=>c!==b.ax1&&c!==b.ax2);
@@ -1270,8 +1313,18 @@ function getBetCombSet(b) {
   if(_combSetCache.has(b)) return _combSetCache.get(b);
   const result = new Set();
   if(b.baken === '3連単') {
-    const p = [[b.t_a,b.t_b,b.t_c],[b.t_a,b.t_c,b.t_b],[b.t_b,b.t_a,b.t_c],[b.t_b,b.t_c,b.t_a],[b.t_c,b.t_a,b.t_b],[b.t_c,b.t_b,b.t_a]];
-    for(let i=0;i<6;i++) if(b.perms[i]) result.add(sortKey(p[i]));
+    const ex2 = parseExcl(b.excl);
+    if(b.kaikata==='流し(1着)'||b.kaikata==='流し(2着)') {
+      const partners = companions(b.maxR, ex2).filter(c=>c!==b.ax);
+      for(const a of partners) for(const c of partners) if(a!==c) result.add(sortKey([b.ax,a,c]));
+    } else if(b.kaikata==='ボックス') {
+      const horses = companions(b.maxR, ex2);
+      for(let i=0;i<horses.length;i++) for(let j=0;j<horses.length;j++) for(let k=0;k<horses.length;k++)
+        if(i!==j&&j!==k&&i!==k) result.add(sortKey([horses[i],horses[j],horses[k]]));
+    } else {
+      const p = [[b.t_a,b.t_b,b.t_c],[b.t_a,b.t_c,b.t_b],[b.t_b,b.t_a,b.t_c],[b.t_b,b.t_c,b.t_a],[b.t_c,b.t_a,b.t_b],[b.t_c,b.t_b,b.t_a]];
+      for(let i=0;i<6;i++) if(b.perms[i]) result.add(sortKey(p[i]));
+    }
   } else {
     const ex = parseExcl(b.excl);
     if(b.kaikata === 'フォーメーション') {
@@ -1332,12 +1385,24 @@ function evalBet(b, race) {
   const cnt = getCount(b);
 
   if(b.baken==='3連単') {
-    const perms_def = [
-      [b.t_a,b.t_b,b.t_c],[b.t_a,b.t_c,b.t_b],
-      [b.t_b,b.t_a,b.t_c],[b.t_b,b.t_c,b.t_a],
-      [b.t_c,b.t_a,b.t_b],[b.t_c,b.t_b,b.t_a],
-    ];
-    const hit = b.perms.some((on,i)=>on && perms_def[i][0]===top3[0] && perms_def[i][1]===top3[1] && perms_def[i][2]===top3[2]);
+    let hit = false;
+    if(b.kaikata==='流し(1着)') {
+      const pts = new Set(companions(b.maxR, ex).filter(c=>c!==b.ax));
+      hit = top3[0]===b.ax && pts.has(top3[1]) && pts.has(top3[2]);
+    } else if(b.kaikata==='流し(2着)') {
+      const pts = new Set(companions(b.maxR, ex).filter(c=>c!==b.ax));
+      hit = top3[1]===b.ax && pts.has(top3[0]) && pts.has(top3[2]);
+    } else if(b.kaikata==='ボックス') {
+      const horses = new Set(companions(b.maxR, ex));
+      hit = top3.every(p=>horses.has(p));
+    } else {
+      const perms_def = [
+        [b.t_a,b.t_b,b.t_c],[b.t_a,b.t_c,b.t_b],
+        [b.t_b,b.t_a,b.t_c],[b.t_b,b.t_c,b.t_a],
+        [b.t_c,b.t_a,b.t_b],[b.t_c,b.t_b,b.t_a],
+      ];
+      hit = b.perms.some((on,i)=>on && perms_def[i][0]===top3[0] && perms_def[i][1]===top3[1] && perms_def[i][2]===top3[2]);
+    }
     const pay3T = (hit && race.tansho_pay) ? (b.budget / Math.max(cnt,1)) / 100 * race.tansho_pay : 0;
     return {hit, pay:pay3T, is3T:true, cnt};
   }
@@ -1384,13 +1449,27 @@ function buildSlotContext(si) {
   for(let bi=0;bi<sl.kinds;bi++) {
     const b = sl.bets[bi];
     if(b.baken === '3連単') {
-      const cnt = b.perms.filter(Boolean).length;
-      const perms_def = [
-        [b.t_a,b.t_b,b.t_c],[b.t_a,b.t_c,b.t_b],
-        [b.t_b,b.t_a,b.t_c],[b.t_b,b.t_c,b.t_a],
-        [b.t_c,b.t_a,b.t_b],[b.t_c,b.t_b,b.t_a],
-      ];
-      const activePDs = perms_def.filter((_,i)=>b.perms[i]);
+      const ex3 = parseExcl(b.excl);
+      let activePDs = [];
+      if(b.kaikata==='流し(1着)') {
+        const partners = companions(b.maxR, ex3).filter(c=>c!==b.ax);
+        for(const a of partners) for(const c of partners) if(a!==c) activePDs.push([b.ax,a,c]);
+      } else if(b.kaikata==='流し(2着)') {
+        const partners = companions(b.maxR, ex3).filter(c=>c!==b.ax);
+        for(const a of partners) for(const c of partners) if(a!==c) activePDs.push([a,b.ax,c]);
+      } else if(b.kaikata==='ボックス') {
+        const horses = companions(b.maxR, ex3);
+        for(const a of horses) for(const b2 of horses) for(const c of horses)
+          if(a!==b2&&b2!==c&&a!==c) activePDs.push([a,b2,c]);
+      } else {
+        const perms_def = [
+          [b.t_a,b.t_b,b.t_c],[b.t_a,b.t_c,b.t_b],
+          [b.t_b,b.t_a,b.t_c],[b.t_b,b.t_c,b.t_a],
+          [b.t_c,b.t_a,b.t_b],[b.t_c,b.t_b,b.t_a],
+        ];
+        activePDs = perms_def.filter((_,i)=>b.perms[i]);
+      }
+      const cnt = activePDs.length;
       betCtxs.push({baken:'3連単', budget:b.budget, cnt, activePDs});
     } else {
       // 三連複: effectiveCombs を事前計算
