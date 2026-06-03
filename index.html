@@ -327,6 +327,15 @@ table.race-table tr:hover td{background:#1c2128}
   <div class="race-filter-bar" id="race-filter-bar"></div>
   <div class="race-wrap"><table class="race-table" id="race-table"><thead></thead><tbody></tbody></table></div>
   <div id="race-pagination" style="display:flex;align-items:center;gap:8px;margin-top:8px"></div>
+
+  <!-- パターン分析 -->
+  <div id="pattern-section" style="margin-top:24px;display:none">
+    <div class="section-title" style="margin-bottom:8px">📊 パターン分析（距離 × 月 × コース）</div>
+    <div id="pattern-slot-btns" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>
+    <div style="overflow-x:auto">
+      <table id="pattern-table" style="width:100%;border-collapse:collapse;font-size:12px"></table>
+    </div>
+  </div>
 </div>
 
 </div>
@@ -1560,9 +1569,168 @@ function recalcAll() {
       console.time('recalc-render');
       renderCmpTable();
       renderRaceTable();
+      renderPatternTable();
       console.timeEnd('recalc-render');
     }, 0);
   }, 0);
+}
+
+function calcPatternGrade(years) {
+  const YRS = ['2023','2024','2025','2026'];
+  const st = {};
+  YRS.forEach(y => {
+    const v = years[y];
+    if(!v || v.races===0) { st[y]='none'; return; }
+    const roi = v.invest>0 ? v.pay/v.invest : 0;
+    st[y] = roi>=1.0 ? 'profit' : roi>=0.8 ? 'slight' : 'loss';
+  });
+
+  const hasData  = YRS.filter(y=>st[y]!=='none');
+  const missing  = YRS.filter(y=>st[y]==='none');
+
+  if(hasData.length < 2) return '—'; // データが1年以下は評価不能
+
+  const allProfit      = hasData.every(y=>st[y]==='profit');
+  const missingOldOnly = missing.every(y=>y<='2024'); // 欠落が23/24のみ
+
+  // 直近年（データある25/26）が全て黒字か
+  const recentYears  = hasData.filter(y=>y>='2025');
+  const recentAllOK  = recentYears.length>0 && recentYears.every(y=>st[y]==='profit');
+
+  // 23/24の不調（赤字・微赤）年数
+  const oldBadCount  = ['2023','2024'].filter(y=>st[y]==='loss'||st[y]==='slight').length;
+  const oldMissCount = ['2023','2024'].filter(y=>st[y]==='none').length;
+
+  // SS: 4年全て黒字
+  if(hasData.length===4 && allProfit) return 'SS';
+
+  // S: 欠落は23/24のみ・3年以上データあり・全て黒字
+  if(hasData.length>=3 && allProfit && missingOldOnly) return 'S';
+
+  // A①: 23/24両方欠落、25/26全て黒字
+  if(oldMissCount===2 && recentAllOK) return 'A';
+
+  // A②: 23か24のどちらか1年だけ赤字/微赤、それ以外（25/26含む）は全て黒字
+  if(missingOldOnly && oldBadCount===1 && recentAllOK &&
+     ['2023','2024'].filter(y=>st[y]==='profit'||st[y]==='none').length>=1) return 'A';
+
+  return '—';
+}
+
+let _patternSlotSI = null; // 選択中のスロットインデックス
+
+function setPatternSlot(si) {
+  _patternSlotSI = si;
+  document.querySelectorAll('.pattern-slot-btn').forEach(b => {
+    b.classList.toggle('nsm-active', +b.dataset.si === si);
+  });
+  renderPatternTable();
+}
+
+function renderPatternTable() {
+  const section = document.getElementById('pattern-section');
+  const tbl = document.getElementById('pattern-table');
+  const btnWrap = document.getElementById('pattern-slot-btns');
+  const activeSI = slots.map((sl,i)=>sl.on?i:-1).filter(i=>i>=0);
+  if(!activeSI.length || !_raceResultsCache) { section.style.display='none'; return; }
+
+  // スロット選択ボタン更新
+  if(!activeSI.includes(_patternSlotSI)) _patternSlotSI = activeSI[0];
+  btnWrap.innerHTML = activeSI.map(si =>
+    `<button class="nsm-btn pattern-slot-btn${si===_patternSlotSI?' nsm-active':''}"
+      data-si="${si}"
+      style="${si===_patternSlotSI?'':'border-color:'+SLOT_COLORS[si]+';color:'+SLOT_COLORS[si]}"
+      onclick="setPatternSlot(${si})">${escHtml(slots[si].name)}</button>`
+  ).join('');
+
+  const si = _patternSlotSI;
+  const cache = _raceResultsCache[si];
+  if(!cache) { section.style.display='none'; return; }
+
+  // 距離×月×コース でグループ集計（選択スロット単体）
+  const groups = {};
+  activeRaces.forEach((race, ri) => {
+    const mo = parseInt(race.date.replace(/^\d{4}年(\d+)月.*$/,'$1'));
+    const yr = race.date.slice(0,4);
+    const key = `${race.track}__${race.distance}__${mo}月`;
+    const r = cache[ri];
+    if(!r) return;
+
+    if(!groups[key]) groups[key] = {track:race.track, dist:race.distance, mo, years:{}, total:{races:0,hits:0,invest:0,pay:0}};
+    const g = groups[key];
+    if(!g.years[yr]) g.years[yr] = {races:0,hits:0,invest:0,pay:0};
+
+    g.years[yr].races++;
+    if(r.hit) g.years[yr].hits++;
+    g.years[yr].invest += r.invest;
+    g.years[yr].pay    += r.pay;
+    g.total.races++;
+    if(r.hit) g.total.hits++;
+    g.total.invest += r.invest;
+    g.total.pay    += r.pay;
+  });
+
+  // 年一覧
+  const allYears = [...new Set(activeRaces.map(r=>r.date.slice(0,4)))].sort();
+
+  // フィルタ：3レース以上あるグループのみ
+  const rows = Object.values(groups)
+    .filter(g => g.total.races >= 1)
+    .sort((a,b) => {
+      // 評価グレード降順 → ROI降順
+      const roiA = a.total.invest>0 ? a.total.pay/a.total.invest*100 : 0;
+      const roiB = b.total.invest>0 ? b.total.pay/b.total.invest*100 : 0;
+      const profitA = roiA >= 100 ? 1 : 0;
+      const profitB = roiB >= 100 ? 1 : 0;
+      if(profitB !== profitA) return profitB - profitA; // 黒字を先に
+      if(profitA === profitB && profitA === 1) return a.mo - b.mo; // 黒字内は月昇順
+      return roiB - roiA; // 赤字内はROI降順
+    });
+
+  if(!rows.length) { section.style.display='none'; return; }
+  section.style.display='block';
+
+  const thStyle = 'padding:6px 10px;border-bottom:1px solid #30363d;color:#8b949e;white-space:nowrap;text-align:center';
+  const tdBase  = 'padding:5px 10px;border-bottom:1px solid #21262d;white-space:nowrap;text-align:center';
+
+  const yearHeaders = allYears.map(y=>`<th style="${thStyle}">${y}年<br><span style="font-size:10px">的中率/ROI</span></th>`).join('');
+  tbl.innerHTML = `<thead><tr>
+    <th style="${thStyle};text-align:left">コース</th>
+    <th style="${thStyle}">距離</th>
+    <th style="${thStyle}">月</th>
+    <th style="${thStyle}">レース数</th>
+    <th style="${thStyle}">的中率</th>
+    <th style="${thStyle}">ROI</th>
+    <th style="${thStyle}">評価</th>
+    ${yearHeaders}
+  </tr></thead><tbody>${rows.map(g => {
+    const tot = g.total;
+    const hitRate = tot.races>0 ? Math.round(g.total.hits/tot.races*100) : 0;
+    const roi     = tot.invest>0 ? Math.round(tot.pay/tot.invest*100) : 0;
+    const grade = calcPatternGrade(g.years);
+    // デバッグ：年別ROIをtooltipで確認
+    const debugTip = ['2023','2024','2025','2026'].map(y=>{const v=g.years[y];return y+':'+(v?Math.round(v.pay/v.invest*100)+'%':'none');}).join(' ');
+    const gradeStyle = grade==='SS' ? 'color:#f5a623;font-weight:700' : grade==='S' ? 'color:#58a6ff;font-weight:700' : grade==='A' ? 'color:#3fb950;font-weight:700' : 'color:#484f58';
+    const roiCls = roi>=100?'color:#3fb950':roi>=70?'color:#f5a623':'color:#f85149';
+    const yearCells = allYears.map(yr => {
+      const y = g.years[yr];
+      if(!y) return `<td style="${tdBase};color:#484f58">—</td>`;
+      const r = Math.round(y.pay/y.invest*100);
+      const h = Math.round(y.hits/y.races*100);
+      const c = r>=100?'color:#3fb950':r>=70?'color:#f5a623':'color:#f85149';
+      return `<td style="${tdBase};${c}">${h}% / ${r}%</td>`;
+    }).join('');
+    return `<tr>
+      <td style="${tdBase};text-align:left">${g.track}</td>
+      <td style="${tdBase}">${g.dist}</td>
+      <td style="${tdBase}">${g.mo}月</td>
+      <td style="${tdBase}">${tot.races}</td>
+      <td style="${tdBase}">${hitRate}%</td>
+      <td style="${tdBase};${roiCls};font-weight:700">${roi}%</td>
+      <td style="${tdBase};${gradeStyle};font-size:13px" title="${debugTip}">${grade}</td>
+      ${yearCells}
+    </tr>`;
+  }).join('')}</tbody>`;
 }
 
 function renderCmpTable() {
