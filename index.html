@@ -115,7 +115,7 @@ table.cmp-table{width:100%;border-collapse:collapse;font-size:13px}
 .rfbtn.active{background:#388bfd;border-color:#388bfd;color:#fff}
 .rfbtn:hover{border-color:#58a6ff;color:#c9d1d9}
 .col-w-row{display:none}
-.race-wrap{overflow-x:auto;max-height:520px;overflow-y:auto;border:1px solid #21262d;border-radius:4px}
+.race-wrap{overflow-x:auto;max-height:80vh;overflow-y:auto;border:1px solid #21262d;border-radius:4px}
 table.race-table{border-collapse:collapse;font-size:12px;min-width:600px}
 table.race-table th{background:#21262d;color:#8b949e;padding:6px 10px;border:1px solid #30363d;position:sticky;top:0;z-index:1;white-space:nowrap;text-align:right}
 table.race-table th.lh{text-align:left}
@@ -135,6 +135,18 @@ table.race-table tr:hover td{background:#1c2128}
 .ri-nm{font-size:12px;font-weight:600;color:#e6edf3}
 .ri-pp{font-size:10px;color:#8b949e}
 .prof-pos{color:#3fb950}.prof-neg{color:#f85149}
+/* 組み合わせTOP3・担当馬 */
+#name-summary .ns-combo-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
+#name-summary .ns-combo-item{display:inline-flex;align-items:center;gap:4px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:2px 8px}
+#name-summary .ns-combo-medal{font-size:13px}
+#name-summary .ns-combo-name{color:#e6edf3;font-weight:600;font-size:12px}
+#name-summary .ns-horse-list{display:flex;flex-wrap:wrap;gap:4px}
+#name-summary .ns-horse-item{background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:1px 8px;font-size:11px;color:#c9d1d9;cursor:pointer}
+#name-summary .ns-horse-item:hover{border-color:#58a6ff;color:#58a6ff}
+#name-summary .ns-horse-item.ns-horse-win{border-color:#1a6a2a;color:#3fb950}
+#name-summary .ns-temp-list{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+#name-summary .ns-temp-item{display:inline-flex;align-items:center;gap:4px;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:2px 8px}
+#name-summary .ns-temp-sep{color:#30363d;margin:0 2px}
 /* 名前サジェスト */
 .name-suggest-wrap{position:relative;display:inline-block}
 .name-suggest-list{position:absolute;top:100%;left:0;z-index:999;background:#161b22;border:1px solid #30363d;border-radius:4px;min-width:160px;max-height:200px;overflow-y:auto;display:none;box-shadow:0 4px 12px rgba(0,0,0,.5)}
@@ -160,7 +172,16 @@ table.race-table tr:hover td{background:#1c2128}
 #name-summary .ns-half{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 #name-summary .ns-item{display:inline-flex;gap:4px;align-items:center}
 #name-summary .ns-vsep{color:#30363d;margin:0 12px;flex-shrink:0}
-#name-summary .ns-analysis-grid{display:grid;grid-template-columns:44px auto auto auto;align-items:center;row-gap:4px;margin-top:4px;width:fit-content}
+#name-summary .ns-analysis-grid{display:grid;grid-template-columns:44px auto auto auto;align-items:start;row-gap:6px;margin-top:4px;width:fit-content;max-width:100%}
+#name-summary .ns-item{flex-wrap:wrap}
+@media(max-width:600px){
+  #name-summary .ns-analysis-grid{display:flex;flex-direction:column;width:100%;gap:6px}
+  #name-summary .ns-label{font-weight:700;margin-bottom:2px}
+  #name-summary .ns-vsep{display:none}
+  #name-summary .ns-half{flex-wrap:wrap;gap:6px}
+  #name-summary .ns-item{flex-wrap:wrap;gap:3px}
+  #name-summary .ns-row{gap:4px 12px}
+}
 /* レース行：名前検索ヒット着順バッジ */
 .pos-badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:11px;font-weight:700;margin-right:4px}
 .pos-b1{background:#3a2a00;color:#f5a623;border:1px solid #a06a00}
@@ -453,6 +474,8 @@ function applyFilters() {
   const temp  = document.getElementById('f_temp').value;
   const upset = document.getElementById('f_upset').value;
   const nameQ = document.getElementById('f_name').value.trim();
+  // "C.ルメール"→"ルメール" のように姓頭文字プレフィックスを除いた短縮形も検索対象にする
+  const nameQShort = nameQ.replace(/^[a-zA-Z]\./,'');
   const checkedYears  = new Set([...document.querySelectorAll('.year-cb:checked')].map(e=>e.value));
   const checkedMonths = new Set([...document.querySelectorAll('.month-cb:checked')].map(e=>+e.value));
   const checkedDists  = new Set([...document.querySelectorAll('.dist-cb:checked')].map(e=>e.value));
@@ -479,10 +502,11 @@ function applyFilters() {
       const searchList = nameSearchMode === 'miss'
         ? (r.all_runners && r.all_runners.length > 0 ? r.all_runners : r.top3_info || [])
         : (r.top3_info || []);
+      const qS = nameQShort.toLowerCase();
       const hit = searchList.some(h =>
-        (h.horse||'').toLowerCase().includes(q) ||
-        (h.jockey||'').toLowerCase().includes(q) ||
-        (h.trainer||'').toLowerCase().includes(q)
+        (h.horse||'').toLowerCase().includes(q) || (qS!==q&&(h.horse||'').toLowerCase().includes(qS)) ||
+        (h.jockey||'').toLowerCase().includes(q) || (qS!==q&&(h.jockey||'').toLowerCase().includes(qS)) ||
+        (h.trainer||'').toLowerCase().includes(q) || (qS!==q&&(h.trainer||'').toLowerCase().includes(qS))
       );
       if(!hit) return false;
     }
@@ -498,8 +522,22 @@ function applyFilters() {
   document.getElementById('race-count-chip').textContent = activeRaces.length + ' レース';
   // トグル表示制御
   document.getElementById('nsm-wrap').classList.toggle('visible', nameQ.length > 0);
-  // サマリー描画
-  renderNameSummary(nameQ, nameSearchMode, activeRaces);
+  // サマリー描画（コース・距離・気温は名前フィルター前の全レースを使う）
+  const racesForStats = nameQ ? RACES.filter(r => {
+    if(track && r.track !== track) return false;
+    if(!checkedYears.has(r.date.slice(0,4))) return false;
+    const mo = parseInt(r.date.replace(/^\d{4}年(\d+)月.*$/,'$1'));
+    if(!checkedMonths.has(mo)) return false;
+    if(date && r.date !== date) return false;
+    if(temp !== '') {
+      const t = r.temp;
+      const band = t < 5 ? 0 : t < 15 ? 1 : t < 25 ? 2 : t < 30 ? 3 : 4;
+      if(band !== parseInt(temp)) return false;
+    }
+    if(!checkedDists.has(r.distance)) return false;
+    return true;
+  }) : [];
+  renderNameSummary(nameQ, nameSearchMode, activeRaces, racesForStats);
   racePage = 0;
   recalcAll();
 }
@@ -540,17 +578,26 @@ let suggestFocusIdx = -1;
 function buildNameIndex() {
   const horses = new Set(), jockeys = new Set(), trainers = new Set();
   RACES.forEach(r => {
-    const list = (r.all_runners && r.all_runners.length > 0) ? r.all_runners : (r.top3_info || []);
+    // all_runnersのみ使用（top3_infoは表記が異なり重複するため除外）
+    const list = r.all_runners || [];
     list.forEach(h => {
       if(h.horse)   horses.add(h.horse);
       if(h.jockey)  jockeys.add(h.jockey);
       if(h.trainer) trainers.add(h.trainer);
     });
   });
-  return { horses:[...horses].sort(), jockeys:[...jockeys].sort(), trainers:[...trainers].sort() };
+  // 短い名前が長い名前の部分文字列になる場合は除外（例：「レーン」と「D.レーン」→「D.レーン」のみ残す）
+  function dedup(set) {
+    const arr = [...set].sort();
+    return arr.filter(name =>
+      !arr.some(other => other !== name && other.includes(name))
+    );
+  }
+  return { horses: dedup(horses), jockeys: dedup(jockeys), trainers: dedup(trainers) };
 }
 let _nameIndex = null;
 function getNameIndex() { if(!_nameIndex) _nameIndex = buildNameIndex(); return _nameIndex; }
+function clearNameIndex() { _nameIndex = null; }
 
 function onNameInput() {
   applyFilters();
@@ -584,6 +631,12 @@ function onNameInput() {
 }
 
 function selectSuggest(name) {
+  document.getElementById('f_name').value = name;
+  closeSuggest();
+  applyFilters();
+}
+
+function searchName(name) {
   document.getElementById('f_name').value = name;
   closeSuggest();
   applyFilters();
@@ -624,38 +677,190 @@ document.addEventListener('click', e => {
   if(!e.target.closest('.name-suggest-wrap')) closeSuggest();
 });
 
-function renderNameSummary(nameQ, mode, races) {
+function renderNameSummary(nameQ, mode, races, allFilteredRaces) {
   const el = document.getElementById('name-summary');
   if(!nameQ || races.length === 0) { el.style.display='none'; return; }
   const q = nameQ.toLowerCase();
+  const qS = nameQ.replace(/^[a-zA-Z]\./,'').toLowerCase();
+  const matchName = (v) => (v||'').toLowerCase().includes(q) || (qS!==q && (v||'').toLowerCase().includes(qS));
+
+  // 検索対象カテゴリを判定（調教師 / 騎手 / 馬名）
+  const idx = getNameIndex();
+  const isTrainer = idx.trainers.some(n=>n.toLowerCase()===q);
+  const isJockey  = !isTrainer && idx.jockeys.some(n=>n.toLowerCase()===q);
+  // isTrainer/isJockeyどちらでもなければ馬名扱い
 
   // 全レースからヒットした出走者の着順を集計
   let total=0, cnt1=0, cnt2=0, cnt3=0, cntOut=0;
   const courseMap={}, distMap={};
+  // 組み合わせ集計用
+  const comboMap={};   // 騎手or調教師 → {runs,wins,place}
+  const horseMap={};   // 馬名 → {runs,wins,place}  (調教師検索時)
+  // 気温レンジ集計（騎手・馬名のみ）
+  const TEMP_BANDS = [[0,10,'〜10℃'],[10,15,'10〜15℃'],[15,20,'15〜20℃'],[20,25,'20〜25℃'],[25,30,'25〜30℃'],[30,99,'30℃〜']];
+  const tempMap = {};
+  TEMP_BANDS.forEach(([,, lbl]) => tempMap[lbl]={runs:0,place:0});
+  // 枠番集計（1〜8枠）
+  const frameMap = {};
+  for(let i=1;i<=8;i++) frameMap[i]={runs:0,place:0};
 
+  // ループ1: 着順・組み合わせ・担当馬の集計（モードに応じたリスト）
   races.forEach(race => {
     const runners = (mode==='miss' && race.all_runners && race.all_runners.length>0)
       ? race.all_runners : (race.top3_info||[]);
-    const matched = runners.find(h=>
-      (h.horse||'').toLowerCase().includes(q)||
-      (h.jockey||'').toLowerCase().includes(q)||
-      (h.trainer||'').toLowerCase().includes(q)
-    );
+    let matched = null, matchedPos = 0;
+    for(let i=0;i<runners.length;i++) {
+      const h = runners[i];
+      if(matchName(h.horse)||matchName(h.jockey)||matchName(h.trainer)) {
+        matched = h; matchedPos = h.pos || (i+1); break;
+      }
+    }
     if(!matched) return;
-    const pos = matched.pos||0;
-    if(pos === 0) return; // 中止・除外は集計から除外
+    const pos = matchedPos;
+    if(pos === 0) return;
     total++;
     if(pos===1) cnt1++; else if(pos===2) cnt2++; else if(pos===3) cnt3++; else cntOut++;
 
-    if(mode==='miss') {
-      const c = race.track||'不明';
-      const d = race.distance||'不明';
-      if(!courseMap[c]) courseMap[c]={runs:0,wins:0,place:0};
-      if(!distMap[d])   distMap[d]  ={runs:0,wins:0,place:0};
-      courseMap[c].runs++; if(pos===1) courseMap[c].wins++; if(pos<=3&&pos>0) courseMap[c].place++;
-      distMap[d].runs++;   if(pos===1) distMap[d].wins++;   if(pos<=3&&pos>0) distMap[d].place++;
+    const allR = race.all_runners && race.all_runners.length>0 ? race.all_runners : runners;
+    const matchedFull = allR.find(h=>matchName(h.horse)||matchName(h.jockey)||matchName(h.trainer)) || matched;
+
+    const comboKey = isTrainer ? (matchedFull.jockey||'不明')
+                   : isJockey  ? (matchedFull.trainer||'不明')
+                   :             (matchedFull.jockey||'不明');
+    if(!comboMap[comboKey]) comboMap[comboKey]={runs:0,wins:0,place:0};
+    comboMap[comboKey].runs++;
+    if(pos===1) comboMap[comboKey].wins++;
+    if(pos<=3)  comboMap[comboKey].place++;
+
+    if(isTrainer) {
+      const hn = matchedFull.horse||'不明';
+      if(!horseMap[hn]) horseMap[hn]={runs:0,wins:0,place:0};
+      horseMap[hn].runs++;
+      if(pos===1) horseMap[hn].wins++;
+      if(pos<=3)  horseMap[hn].place++;
     }
   });
+
+  // ループ2: コース・距離・気温は名前フィルター前の全レースのall_runnersで集計
+  (allFilteredRaces || races).forEach(race => {
+    const allR = race.all_runners || [];
+    const h = allR.find(h=>matchName(h.horse)||matchName(h.jockey)||matchName(h.trainer));
+    if(!h) return;
+    const fullPos = h.pos||0;
+    if(fullPos === 0) return;
+
+    const c = race.track||'不明';
+    const d = race.distance||'不明';
+    if(!courseMap[c]) courseMap[c]={runs:0,wins:0,place:0};
+    if(!distMap[d])   distMap[d]  ={runs:0,wins:0,place:0};
+    courseMap[c].runs++; if(fullPos===1) courseMap[c].wins++; if(fullPos<=3) courseMap[c].place++;
+    distMap[d].runs++;   if(fullPos===1) distMap[d].wins++;   if(fullPos<=3) distMap[d].place++;
+
+    if(!isTrainer) {
+      const t = parseFloat(race.temp);
+      if(!isNaN(t)) {
+        const band = TEMP_BANDS.find(([lo,hi])=>t>=lo&&t<hi);
+        if(band) { const lbl=band[2]; tempMap[lbl].runs++; if(fullPos<=3) tempMap[lbl].place++; }
+      }
+    }
+    // 枠番
+    const fr = h.frame;
+    if(fr >= 1 && fr <= 8) { frameMap[fr].runs++; if(fullPos<=3) frameMap[fr].place++; }
+  });
+
+  // TOP3コンボHTML生成（共通）
+  const comboLabel = isTrainer ? '騎手' : isJockey ? '調教師' : '騎手';
+  const top3combo = Object.entries(comboMap)
+    .sort((a,b)=>b[1].wins-a[1].wins||b[1].place-a[1].place).slice(0,3);
+  const comboHtml = top3combo.length > 0
+    ? `<div class="ns-combo-row">
+        <span class="ns-label">${comboLabel}TOP3:</span>
+        ${top3combo.map(([name,v],i)=>{
+          const medal = i===0?'🥇':i===1?'🥈':'🥉';
+          return `<span class="ns-combo-item" onclick="searchName('${escHtml(name)}')" style="cursor:pointer"><span class="ns-combo-medal">${medal}</span><span class="ns-combo-name">${escHtml(name)}</span><span class="ns-tag">${v.wins}勝</span><span class="ns-tag">複勝${v.place}回</span><span class="ns-tag">${v.runs}出走</span></span>`;
+        }).join('')}
+      </div>`
+    : '';
+
+  // 担当馬HTML（調教師検索時のみ）
+  const horseEntries = Object.entries(horseMap).sort((a,b)=>b[1].wins-a[1].wins||b[1].runs-a[1].runs);
+  const horseHtml = isTrainer && horseEntries.length > 0
+    ? `<div class="ns-combo-row">
+        <span class="ns-label">担当馬:</span>
+        <span class="ns-horse-list">${horseEntries.map(([name,v])=>
+          `<span class="ns-horse-item${v.wins>0?' ns-horse-win':''}" title="${v.runs}出走 複勝${v.place}回" onclick="searchName('${escHtml(name)}')">${escHtml(name)}${v.wins>0?' '+v.wins+'勝':''}</span>`
+        ).join('')}</span>
+      </div>`
+    : '';
+
+  // コース・距離分析（着外分析、または馬名の的中分析で使用）
+  const MIN_RUNS = 3;
+  const courseEntries = Object.entries(courseMap).filter(([,v])=>v.runs>=MIN_RUNS)
+    .sort((a,b)=>a[0].localeCompare(b[0]));
+  const courseRow = courseEntries.length >= 2
+    ? (() => {
+        const maxPlace = Math.max(...courseEntries.map(([,v])=>v.place/v.runs));
+        return courseEntries.map(([name,v]) => {
+          const missRate = Math.round((v.runs-v.place)/v.runs*100);
+          const winPct   = Math.round(v.wins/v.runs*100);
+          const isBest   = v.place/v.runs === maxPlace;
+          const nameCls  = isBest ? 'ns-strong' : 'ns-weak';
+          return `<span class="ns-half"><span class="ns-item"><span class="${nameCls}">${name}</span><span class="ns-tag">着外率</span><span class="ns-val">${missRate}%</span></span><span class="ns-item"><span class="ns-tag">${v.runs}出走→${v.wins}勝(${winPct}%)</span></span></span>`;
+        }).join('<span class="ns-vsep">|</span>');
+      })()
+    : null;
+
+  const distEntries = Object.entries(distMap).filter(([,v])=>v.runs>=MIN_RUNS);
+  const hasMultipleDist = distEntries.length >= 2;
+  function pickDist(sorted) { const [n,v]=sorted[0]; return {n,v}; }
+  let wdStr=null, sdWinStr=null, sdPlaceStr=null;
+  if(hasMultipleDist) {
+    const byMissRate = [...distEntries].sort((a,b)=>(b[1].runs-b[1].place)/b[1].runs-(a[1].runs-a[1].place)/a[1].runs);
+    const byWinRate  = [...distEntries].sort((a,b)=>b[1].wins/b[1].runs-a[1].wins/a[1].runs);
+    const byPlaceRate= [...distEntries].sort((a,b)=>b[1].place/b[1].runs-a[1].place/a[1].runs);
+    const mr=pickDist(byMissRate), wr=pickDist(byWinRate), pr=pickDist(byPlaceRate);
+    const runStats = (v) => `${v.runs}出走→${v.wins}勝(${Math.round(v.wins/v.runs*100)}%)`;
+    wdStr = `<span class="ns-item"><span class="ns-weak">${mr.n}</span><span class="ns-tag">着外率</span><span class="ns-val">${Math.round((mr.v.runs-mr.v.place)/mr.v.runs*100)}%</span><span class="ns-tag">出走数</span><span class="ns-val">${runStats(mr.v)}</span></span>`;
+    sdWinStr = `<span class="ns-item"><span class="ns-strong">${wr.n}</span><span class="ns-tag">勝率</span><span class="ns-val">${Math.round(wr.v.wins/wr.v.runs*100)}%</span><span class="ns-tag">出走数</span><span class="ns-val">${runStats(wr.v)}</span></span>`;
+    sdPlaceStr = `<span class="ns-item"><span class="ns-strong">${pr.n}</span><span class="ns-tag">複勝率</span><span class="ns-val">${Math.round(pr.v.place/pr.v.runs*100)}%</span><span class="ns-tag">出走数</span><span class="ns-val">${runStats(pr.v)}</span></span>`;
+  }
+
+  // 気温レンジHTML（騎手・馬名のみ、出走ありのレンジのみ表示）
+  const tempHtml = !isTrainer ? (() => {
+    const bands = TEMP_BANDS.map(([,,lbl])=>lbl).filter(lbl=>tempMap[lbl].runs>0);
+    if(bands.length === 0) return '';
+    const items = bands.map(lbl => {
+      const v = tempMap[lbl];
+      const rate = Math.round(v.place/v.runs*100);
+      return `<span class="ns-temp-item"><span class="ns-tag">${lbl}</span><span class="ns-val">${rate}%</span><span class="ns-tag">${v.runs}出走</span></span>`;
+    }).join('<span class="ns-temp-sep">／</span>');
+    return `<div class="ns-combo-row"><span class="ns-label">気温別3着内率:</span><span class="ns-temp-list">${items}</span></div>`;
+  })() : '';
+
+  // 枠番HTML（出走ありの枠のみ）
+  const frameHtml = (() => {
+    const frames = Object.entries(frameMap).filter(([,v])=>v.runs>0);
+    if(frames.length === 0) return '';
+    const items = frames.map(([fr, v]) => {
+      const rate = Math.round(v.place/v.runs*100);
+      const cls = rate >= 50 ? 'ns-strong' : rate >= 30 ? '' : 'ns-weak';
+      return `<span class="ns-temp-item"><span class="${cls||'ns-val'}">${fr}枠</span><span class="ns-val">${rate}%</span><span class="ns-tag">${v.runs}出走</span></span>`;
+    }).join('<span class="ns-temp-sep">／</span>');
+    return `<div class="ns-combo-row"><span class="ns-label">枠番別3着内率:</span><span class="ns-temp-list">${items}</span></div>`;
+  })();
+
+  const courseDistHtml = (courseRow||hasMultipleDist) ? `<div class="ns-analysis-grid">
+    ${courseRow?`<span class="ns-label">コース:</span>${courseRow}`:''}
+    ${hasMultipleDist?`
+      <span class="ns-label">距離:</span>
+      <span class="ns-half">${wdStr}</span>
+      <span class="ns-vsep">|</span>
+      <span class="ns-half">${sdWinStr}${sdPlaceStr}</span>
+    `:''}
+  </div>` : '';
+
+  const winRate = total>0 ? (cnt1/total*100).toFixed(1) : '0.0';
+  const placeRate = total>0 ? ((cnt1+cnt2+cnt3)/total*100).toFixed(1) : '0.0';
 
   if(mode==='hit') {
     el.style.display='block';
@@ -666,48 +871,13 @@ function renderNameSummary(nameQ, mode, races) {
       <span class="ns-tag">1着:</span><span class="ns-val">${cnt1}</span>
       <span class="ns-tag">2着:</span><span class="ns-val">${cnt2}</span>
       <span class="ns-tag">3着:</span><span class="ns-val">${cnt3}</span>
-    </div>`;
+    </div>
+    ${horseHtml}
+    ${comboHtml}
+    ${tempHtml}
+    ${frameHtml}
+    ${courseDistHtml}`;
   } else {
-    // 苦手コース・距離を計算（3出走以上）
-    const MIN_RUNS = 3;
-
-    // コース行：全コースを並べて表示
-    const courseEntries = Object.entries(courseMap).filter(([,v])=>v.runs>=MIN_RUNS)
-      .sort((a,b)=>a[0].localeCompare(b[0])); // 名前順に並べる
-
-    const courseRow = courseEntries.length >= 2
-      ? (() => {
-          const maxPlace = Math.max(...courseEntries.map(([,v])=>v.place/v.runs));
-          return courseEntries.map(([name,v]) => {
-            const missRate = Math.round((v.runs-v.place)/v.runs*100);
-            const winPct   = Math.round(v.wins/v.runs*100);
-            const isBest   = v.place/v.runs === maxPlace;
-            const nameCls  = isBest ? 'ns-strong' : 'ns-weak';
-            return `<span class="ns-half"><span class="ns-item"><span class="${nameCls}">${name}</span><span class="ns-tag">着外率</span><span class="ns-val">${missRate}%</span></span><span class="ns-item"><span class="ns-tag">${v.runs}出走→${v.wins}勝(${winPct}%)</span></span></span>`;
-          }).join('<span class="ns-vsep">|</span>');
-        })()
-      : null;
-
-    // 距離：苦手（着外率最大・着外数最大）、得意（勝率最大・複勝率最大・勝利数最大）
-    const distEntries = Object.entries(distMap).filter(([,v])=>v.runs>=MIN_RUNS);
-    const hasMultipleDist = distEntries.length >= 2;
-
-    function pickDist(sorted) { const [n,v]=sorted[0]; return {n,v}; }
-
-    let wdStr=null, sdWinStr=null, sdPlaceStr=null;
-    if(hasMultipleDist) {
-      const byMissRate = [...distEntries].sort((a,b)=>(b[1].runs-b[1].place)/b[1].runs-(a[1].runs-a[1].place)/a[1].runs);
-      const byWinRate  = [...distEntries].sort((a,b)=>b[1].wins/b[1].runs-a[1].wins/a[1].runs);
-      const byPlaceRate= [...distEntries].sort((a,b)=>b[1].place/b[1].runs-a[1].place/a[1].runs);
-      const mr=pickDist(byMissRate), wr=pickDist(byWinRate), pr=pickDist(byPlaceRate);
-      const runStats = (v) => `${v.runs}出走→${v.wins}勝(${Math.round(v.wins/v.runs*100)}%)`;
-      wdStr = `<span class="ns-item"><span class="ns-weak">${mr.n}</span><span class="ns-tag">着外率</span><span class="ns-val">${Math.round((mr.v.runs-mr.v.place)/mr.v.runs*100)}%</span><span class="ns-tag">出走数</span><span class="ns-val">${runStats(mr.v)}</span></span>`;
-      sdWinStr = `<span class="ns-item"><span class="ns-strong">${wr.n}</span><span class="ns-tag">勝率</span><span class="ns-val">${Math.round(wr.v.wins/wr.v.runs*100)}%</span><span class="ns-tag">出走数</span><span class="ns-val">${runStats(wr.v)}</span></span>`;
-      sdPlaceStr = `<span class="ns-item"><span class="ns-strong">${pr.n}</span><span class="ns-tag">複勝率</span><span class="ns-val">${Math.round(pr.v.place/pr.v.runs*100)}%</span><span class="ns-tag">出走数</span><span class="ns-val">${runStats(pr.v)}</span></span>`;
-    }
-
-    const winRate = total>0 ? (cnt1/total*100).toFixed(1) : '0.0';
-    const placeRate = total>0 ? ((cnt1+cnt2+cnt3)/total*100).toFixed(1) : '0.0';
 
     el.style.display='block';
     el.innerHTML = `<div class="ns-row">
@@ -722,15 +892,11 @@ function renderNameSummary(nameQ, mode, races) {
       <span class="ns-tag">勝率:</span><span class="ns-val">${winRate}%</span>
       <span class="ns-tag">複勝率:</span><span class="ns-val">${placeRate}%</span>
     </div>
-    ${(courseRow||hasMultipleDist)?`<div class="ns-analysis-grid">
-      ${courseRow?`<span class="ns-label">コース:</span>${courseRow}`:''}
-      ${hasMultipleDist?`
-        <span class="ns-label">距離:</span>
-        <span class="ns-half">${wdStr}</span>
-        <span class="ns-vsep">|</span>
-        <span class="ns-half">${sdWinStr}${sdPlaceStr}</span>
-      `:''}
-    </div>`:''}`;
+    ${horseHtml}
+    ${comboHtml}
+    ${tempHtml}
+    ${frameHtml}
+    ${courseDistHtml}`;
   }
 }
 
