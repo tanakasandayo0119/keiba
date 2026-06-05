@@ -124,9 +124,11 @@ table.race-table td.lh{text-align:left}
 table.race-table tr:hover td{background:#1c2128}
 .row-hit td{background:#0d2312 !important}
 .row-miss td{background:#0d1117}
+.row-pending td{background:#161b22}
 .hit-badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600}
 .hb-y{background:#0d4a21;color:#3fb950;border:1px solid #1a7a32}
 .hb-n{background:#2d1112;color:#f85149;border:1px solid #5a1a1a}
+.hb-p{background:#1c2128;color:#8b949e;border:1px solid #30363d}
 /* レース行 結果セル用クラス（インラインスタイル削減） */
 .ri-row{display:flex;align-items:center;gap:5px;margin-bottom:3px;white-space:nowrap}
 .ri-pop{font-size:10px;font-weight:700;min-width:28px}
@@ -1014,6 +1016,7 @@ function applyFilters() {
       if(band !== parseInt(temp)) return false;
     }
     if(upset !== '') {
+      if(!r.top3 || r.top3.length === 0) return false;
       const mx = Math.max(...r.top3);
       const u = mx <= 3 ? 0 : mx <= 5 ? 1 : mx <= 8 ? 2 : mx <= 11 ? 3 : 4;
       if(u !== parseInt(upset)) return false;
@@ -2063,6 +2066,7 @@ function evalSlotRace(betCtxs, race) {
   let invest = 0, retPay = 0, anyHit = false, has3T = false;
   const top3 = race.top3;
   const hasTop3 = top3 && top3.length >= 3;
+  if(!hasTop3) return {hit:false, invest:0, pay:0, profit:0, has3T:false, pending:true};
   const top3Key = hasTop3 ? sortKey(top3) : null;
 
   for(const ctx of betCtxs) {
@@ -2101,6 +2105,7 @@ function evalSlotRace(betCtxs, race) {
 }
 
 function slotRaceResult(si, race) {
+  if(!race.top3 || race.top3.length < 3) return {hit:false, invest:0, pay:0, profit:0, has3T:false, pending:true};
   const sl = slots[si];
   let invest = 0, retPay = 0, anyHit = false, has3T = false;
   const hasDedupSettings = sl.dedup && sl.dedup.length > 0;
@@ -2525,8 +2530,8 @@ function renderRaceTable() {
 
   const rows = [];
   pageRaces.forEach(({race, raceIdx, results}) => {
-    const mx = Math.max(...race.top3);
-    const uLabel = mx<=3?'堅':mx<=5?'やや堅':mx<=8?'中波乱':mx<=11?'大波乱':'超波乱';
+    const mx = (race.top3 && race.top3.length) ? Math.max(...race.top3) : -1;
+    const uLabel = mx < 0 ? '結果待ち' : mx<=3?'堅':mx<=5?'やや堅':mx<=8?'中波乱':mx<=11?'大波乱':'超波乱';
 
     // 名前検索ヒット時の着順バッジ
     const nameQ2 = document.getElementById('f_name').value.trim();
@@ -2559,10 +2564,12 @@ function renderRaceTable() {
           return `<div class="ri-row"><span class="ri-pop ${cc}">${p}人気</span><span class="ri-chu">(${chakuMap[i]||'—'})</span></div>`;
         }).join('');
 
+    const isPending = results.every(r=>r.pending);
     const anyHit = results.some(r=>r.hit);
-    const rowCls = anyHit ? 'row-hit' : 'row-miss';
+    const rowCls = isPending ? 'row-pending' : anyHit ? 'row-hit' : 'row-miss';
 
     const slotCells = results.map(r=>{
+      if(r.pending) return `<td><span class="hit-badge hb-p">結果待</span></td><td>—</td><td>—</td><td>—</td>`;
       const hasPay = !r.has3T || (race.tansho_pay != null);
       const nd = (r.has3T && race.tansho_pay == null) ? '<span class="ri-pp" title="三連単配当データなし"> ※</span>' : '';
       const roiStr = (hasPay && r.invest && r.hit) ? (r.pay/r.invest*100).toFixed(0)+'%' : '—';
